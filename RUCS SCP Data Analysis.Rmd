@@ -1,0 +1,935 @@
+---
+title: "RUCS SCP Data Analysis"
+author: "Chengen Gu"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# Install and load tidyverse and readxl
+# install.packages("tidyverse")
+# install.packages("readxl")
+# install.packages("dplyr")
+install.packages("gridExtra")
+library(tidyverse)
+library(readxl)
+library(dplyr)
+```
+
+### Clean CS110 Data
+```{r}
+# Read Excel spreadsheets for two CS courses of interest that implemented the Second Chance Policy: CS110 and CS170
+CS110 <- read_excel("C:/Users/cespt/CESP Rutgers Dropbox/Chengen Gu/CESP - Chengen Gu/Fran's SCP Project/CS110.xlsx") 
+
+# Check the first few rows of CS110 before data cleaning
+head(CS110)
+
+# We only want certain columns of CS110, and we want to rename some of the columns. We also would like to reassign values to some of the variables to make it more readable.
+CS110 <- CS110 %>% 
+  select(`S Gender Cd`, `URM Bucket`,  `C Year`, `C Term`, `C Course No`, `C Section No`, `C Grade`,`Exam 1 Grade`, `Part1-Final`, `Exam 2 Grade (457348)`, `Part2-Final`) %>% 
+  rename(Gender =`S Gender Cd`,
+         URM = `URM Bucket`,
+         Year = `C Year`,
+         Term = `C Term`,
+         Course = `C Course No`,
+         Section = `C Section No`,
+         Grade = `C Grade`,
+         Exam1 = `Exam 1 Grade`,
+         Part1_final = `Part1-Final`,
+         Exam2 = `Exam 2 Grade (457348)`,
+         Part2_final = `Part2-Final`) %>%
+  mutate(URM = case_when(
+    URM == "URM" ~ 1,
+    URM == "OTHER"~ 0))  %>%
+  mutate(Term = case_when (
+    Term == 9 ~ "Fall",
+    Term == 1 ~ "Spring" )) %>%
+  mutate(Instru_mode = case_when (
+    (Year == "2019" & Term == "Fall") | Year == "2022" | (Year == "2023" & Term == "Spring") ~ "in person",
+    Year == "2020" | Year == "2021" ~ "online"))
+  
+# Check the first few rows of CS110 after data cleaning
+head(CS110) 
+```
+
+### Clean CS170 Data
+```{r}
+CS170 <- read_excel ("C:/Users/cespt/CESP Rutgers Dropbox/Chengen Gu/CESP - Chengen Gu/Fran's SCP Project/CS170.xlsx")
+
+# Check the first few rows of CS170 before data cleaning
+head(CS170)
+ 
+# We only want certain columns of CS170, and we want to rename some of the columns to make it consistent with the CS110 data set. We also would like to reassign values to some of the variables to make it more readable.
+CS170 <- CS170 %>% select(Gender, UMR2, CYear, CTerm, Course, Section, Grade, EXAM1, `FINAL-PART1`, EXAM2, `FINAL-PART2`) %>%
+  rename(URM = UMR2,
+         Year = CYear,
+         Term = CTerm,
+         Exam1 = EXAM1,
+         Part1_final = `FINAL-PART1`,
+         Exam2 = EXAM2,
+         Part2_final = `FINAL-PART2`) %>%
+  mutate(URM = case_when(
+    URM == "URM" ~ 1,
+    URM == "OTHER"~ 0))  %>%
+  mutate(Term = case_when (
+    Term == 9 ~ "Fall",
+    Term == 1 ~ "Spring"))
+  
+# Check the first few rows of CS170 before data cleaning
+head(CS170)         
+```
+
+```{r}
+# Conduct first round of exploratory analysis for descriptive statistics
+summary(CS110)
+summary(CS170)
+```
+
+
+```{r}
+# We should drop the records for students who have a "W" (Withdraw) grade from our analysis. 
+CS110 <- CS110 %>% filter(Grade != "W")
+CS170 <- CS170 %>% filter(Grade != "W")
+```
+
+
+```{r}
+# Check for rows with missing values. We want to remove records with both Exam 1 and Exam 2 score missing or either part 1 or part 2 final missing from our analysis because these students are not eligible for Second Chance Policy. (Students can only have one excused absence for either Exam1 or Exam2, and both part1 and part 2 of the final are mandatory)
+missing_CS110 <- CS110 %>%
+  filter((is.na(Exam1) & is.na(Exam2)) | (is.na(Part1_final) | is.na(Part2_final)))
+print(nrow(missing_CS110))
+print(missing_CS110)
+# After dropping "W" grade from CS110, there are still 4 CS110 students with missing exam information.
+missing_CS170 <- CS170 %>%
+  filter((is.na(Exam1) & is.na(Exam2)) | (is.na(Part1_final) | is.na(Part2_final)))
+print(nrow(missing_CS170))
+print(missing_CS170)
+# After dropping "W" grade from CS170, there are still 2 CS170 students with missing exam information.
+```
+
+```{r}
+# We would like to exclude them from our analysis.
+filtered_CS110 <- CS110 %>% filter(!(is.na(Exam1) & (is.na(Exam2))) & !is.na(Part1_final) & !is.na(Part2_final))
+filtered_CS170 <- CS170 %>% filter(!(is.na(Exam1) & (is.na(Exam2))) & !is.na(Part1_final) & !is.na(Part2_final))
+
+# We would also want to count how many records have Exam 1 missing and use Part_1 final as a substitute 
+```
+
+```{r}
+# Conduct Second round of exploratory analysis for descriptive statistics for cleaned CS110 and CS170.
+summary(filtered_CS110)
+summary(filtered_CS170)
+head(filtered_CS110)
+head(filtered_CS170)
+```
+
+```{r}
+# Take the computation for mean benefits for CS110 overall
+# Calculate the mean benefit for higher_part1 ONLY
+higher_part1_mean_benefit_CS110 <- filtered_CS110 %>%
+  filter(
+    (!is.na(Exam1) & Exam1 > 0 & Part1_final > Exam1) &
+    ((!is.na(Exam2) & Exam2 > 0 & Part2_final <= Exam2) |
+       (is.na(Exam2)) & Part2_final == 0)) %>%
+  summarise(mean_benefit = mean(Part1_final - Exam1, na.rm = TRUE)) %>%
+  pull(mean_benefit)
+
+# Calculate the mean benefit for higher_part2  
+higher_part2_mean_benefit_CS110 <- filtered_CS110 %>%
+  filter(
+    (!is.na(Exam2) & Exam2 > 0 & Part2_final > Exam2) &
+    ((!is.na(Exam1) & Exam1 > 0 & Part1_final <= Exam1) |
+       (is.na(Exam1)) & Part1_final == 0)) %>%
+  summarise(mean_benefit = mean(Part2_final - Exam2, na.rm = TRUE)) %>%
+  pull(mean_benefit)
+
+# Calculate the mean benefit for higher_both
+higher_both_mean_benefit_CS110 <- filtered_CS110 %>%
+  filter((!is.na(Exam1) & !is.na(Exam2) & Exam1 > 0 & Exam2 > 0 & Part1_final > Exam1 & Part2_final > Exam2) | 
+            (is.na(Exam1) & Part1_final > 0 & is.na(Exam2) & Part2_final > 0)) %>%
+  mutate(total_benefit = (Part1_final - Exam1) + (Part2_final - Exam2)) %>%
+  summarise(mean_benefit = mean(total_benefit, na.rm = TRUE)) %>%
+  pull(mean_benefit)
+
+# Summarize the results for CS110 overall
+CS110_overall <- filtered_CS110 %>%
+  summarise(
+    n = n(),
+    higher_part1_count = sum(!is.na(Exam1) & Exam1 > 0 & Part1_final > Exam1 &
+    ((!is.na(Exam2) & Exam2 > 0 & Part2_final <= Exam2) | (is.na(Exam2)) & Part2_final == 0)),
+    higher_part1_pct = higher_part1_count / nrow(filtered_CS110),
+    higher_part1_mean_benefit = higher_part1_mean_benefit_CS110,
+    higher_part1_mean_benfit_pct = higher_part1_mean_benefit / 500, 
+    higher_part2_count = sum(!is.na(Exam2) & Exam2 > 0 & Part2_final > Exam2 &
+    ((!is.na(Exam1) & Exam1 > 0 & Part1_final <= Exam1) | (is.na(Exam1)) & Part1_final == 0)),
+    higher_part2_pct = higher_part2_count / nrow(filtered_CS110),
+    higher_part2_mean_benefit = higher_part2_mean_benefit_CS110,
+    higher_part2_mean_benfit_pct = higher_part2_mean_benefit / 500, 
+    higher_both_count = sum((!is.na(Exam1) & !is.na(Exam2) & Exam1 > 0 & Exam2 > 0 & Part1_final > Exam1 & Part2_final > Exam2) | 
+            (is.na(Exam1) & Part1_final > 0 & is.na(Exam2) & Part2_final > 0)),
+    higher_both_pct = higher_both_count / nrow(filtered_CS110),
+    higher_both_mean_benefit = higher_both_mean_benefit_CS110,
+    higher_both_mean_benfit_pct = higher_both_mean_benefit / 500, 
+    lower_both_count = sum(
+      # Case 1: Both midterm exams are non-null, non-zero, and both finals are not higher
+      (!is.na(Exam1) & !is.na(Exam2) & Exam1 > 0 & Exam2 > 0 & 
+       Part1_final <= Exam1 & Part2_final <= Exam2) |
+      # Case 2: Exam1 is null, Exam2 is non-zero, Part2_final is not higher, and Part1_final is zero
+      (is.na(Exam1) & !is.na(Exam2) & Exam2 > 0 & Part2_final <= Exam2 & Part1_final == 0) |
+      # Case 3: Exam2 is null, Exam1 is non-zero, Part1_final is not higher, and Part2_final is zero
+      (is.na(Exam2) & !is.na(Exam1) & Exam1 > 0 & Part1_final <= Exam1 & Part2_final == 0) |
+      # Case 4: Either exam is zero (student doesn't benefit)
+      ((!is.na(Exam1) & Exam1 == 0) | (!is.na(Exam2) & Exam2 == 0))
+    ),
+    lower_both_pct = lower_both_count / n(),
+    lower_both_mean_benefit = 0
+  )
+
+print(CS110_overall)
+```
+
+```{r}
+# Summarize the results for CS110 by Gender
+CS110_Gender_summary <- filtered_CS110 %>%
+  group_by(Gender) %>%
+  summarise(
+    n = n(),
+    higher_part1_count = sum(!is.na(Exam1) & Exam1 > 0 & Part1_final > Exam1 &
+    ((!is.na(Exam2) & Exam2 > 0 & Part2_final <= Exam2) | (is.na(Exam2)) & Part2_final == 0)),
+    higher_part1_pct = higher_part1_count / n(),
+    higher_part1_mean_benefit = mean((Part1_final - Exam1)[!is.na(Exam1) & Exam1 > 0 & Part1_final > Exam1 &
+    ((!is.na(Exam2) & Exam2 > 0 & Part2_final <= Exam2) | (is.na(Exam2)) & Part2_final == 0)], na.rm = TRUE),
+    higher_part1_mean_benfit_pct = higher_part1_mean_benefit / 500, 
+    
+    higher_part2_count = sum(!is.na(Exam2) & Exam2 > 0 & Part2_final > Exam2 &
+    ((!is.na(Exam1) & Exam1 > 0 & Part1_final <= Exam1) | (is.na(Exam1)) & Part1_final == 0)),
+    higher_part2_pct = higher_part2_count / n(),
+    higher_part2_mean_benefit = mean((Part2_final - Exam2)[!is.na(Exam2) & Exam2 > 0 & Part2_final > Exam2 &
+    ((!is.na(Exam1) & Exam1 > 0 & Part1_final <= Exam1) | (is.na(Exam1)) & Part1_final == 0)], na.rm = TRUE),
+    higher_part2_mean_benfit_pct = higher_part2_mean_benefit / 500, 
+    
+    higher_both_count = sum((!is.na(Exam1) & !is.na(Exam2) & Exam1 > 0 & Exam2 > 0 & Part1_final > Exam1 & Part2_final > Exam2) | 
+            (is.na(Exam1) & Part1_final > 0 & is.na(Exam2) & Part2_final > 0)),
+    higher_both_pct = higher_both_count / n(),
+    higher_both_mean_benefit = mean(((Part1_final - Exam1) + (Part2_final - Exam2))[(!is.na(Exam1) & !is.na(Exam2) & Exam1 > 0 & Exam2 > 0 &   Part1_final > Exam1 & Part2_final > Exam2) | 
+            (is.na(Exam1) & Part1_final > 0 & is.na(Exam2) & Part2_final > 0)], na.rm = TRUE),
+     higher_both_mean_benfit_pct = higher_both_mean_benefit / 500, 
+    
+    lower_both_count = sum(
+      (!is.na(Exam1) & !is.na(Exam2) & Exam1 > 0 & Exam2 > 0 & 
+       Part1_final <= Exam1 & Part2_final <= Exam2) |
+      (is.na(Exam1) & !is.na(Exam2) & Exam2 > 0 & Part2_final <= Exam2 & Part1_final == 0) |
+      (is.na(Exam2) & !is.na(Exam1) & Exam1 > 0 & Part1_final <= Exam1 & Part2_final == 0) |
+      ((!is.na(Exam1) & Exam1 == 0) | (!is.na(Exam2) & Exam2 == 0))
+    ),
+    lower_both_pct = lower_both_count / n(),
+    lower_both_mean_benefit = 0
+  )
+
+print(CS110_Gender_summary)
+```
+```{r}
+# Summarize the results for CS110 by URM Group
+CS110_URM_summary <- filtered_CS110 %>%
+  group_by(URM) %>%
+  summarise(
+    n = n(),
+    higher_part1_count = sum(!is.na(Exam1) & Exam1 > 0 & Part1_final > Exam1 &
+    ((!is.na(Exam2) & Exam2 > 0 & Part2_final <= Exam2) | (is.na(Exam2)) & Part2_final == 0)),
+    higher_part1_pct = higher_part1_count / n(),
+    higher_part1_mean_benefit = mean((Part1_final - Exam1)[!is.na(Exam1) & Exam1 > 0 & Part1_final > Exam1 &
+    ((!is.na(Exam2) & Exam2 > 0 & Part2_final <= Exam2) | (is.na(Exam2)) & Part2_final == 0)], na.rm = TRUE),
+    higher_part1_mean_benfit_pct = higher_part1_mean_benefit / 500, 
+    
+    higher_part2_count = sum(!is.na(Exam2) & Exam2 > 0 & Part2_final > Exam2 &
+    ((!is.na(Exam1) & Exam1 > 0 & Part1_final <= Exam1) | (is.na(Exam1)) & Part1_final == 0)),
+    higher_part2_pct = higher_part2_count / n(),
+    higher_part2_mean_benefit = mean((Part2_final - Exam2)[!is.na(Exam2) & Exam2 > 0 & Part2_final > Exam2 &
+    ((!is.na(Exam1) & Exam1 > 0 & Part1_final <= Exam1) | (is.na(Exam1)) & Part1_final == 0)], na.rm = TRUE),
+    higher_part2_mean_benfit_pct = higher_part2_mean_benefit / 500, 
+    
+    higher_both_count = sum((!is.na(Exam1) & !is.na(Exam2) & Exam1 > 0 & Exam2 > 0 & Part1_final > Exam1 & Part2_final > Exam2) | 
+            (is.na(Exam1) & Part1_final > 0 & is.na(Exam2) & Part2_final > 0)),
+    higher_both_pct = higher_both_count / n(),
+    higher_both_mean_benefit = mean(((Part1_final - Exam1) + (Part2_final - Exam2))[(!is.na(Exam1) & !is.na(Exam2) & Exam1 > 0 & Exam2 > 0 & Part1_final > Exam1 & Part2_final > Exam2) | 
+            (is.na(Exam1) & Part1_final > 0 & is.na(Exam2) & Part2_final > 0)], na.rm = TRUE),
+    higher_both_mean_benfit_pct = higher_both_mean_benefit / 500, 
+    
+    lower_both_count = sum(
+      (!is.na(Exam1) & !is.na(Exam2) & Exam1 > 0 & Exam2 > 0 & 
+       Part1_final <= Exam1 & Part2_final <= Exam2) |
+      (is.na(Exam1) & !is.na(Exam2) & Exam2 > 0 & Part2_final <= Exam2 & Part1_final == 0) |
+      (is.na(Exam2) & !is.na(Exam1) & Exam1 > 0 & Part1_final <= Exam1 & Part2_final == 0) |
+      ((!is.na(Exam1) & Exam1 == 0) | (!is.na(Exam2) & Exam2 == 0))
+    ),
+    lower_both_pct = lower_both_count / n(),
+    lower_both_mean_benefit = 0
+  )
+
+print(CS110_URM_summary)
+```
+
+```{r}
+# Summarize the results for CS110 by Gender within URM groups
+CS110_URM_Gender_summary <- filtered_CS110 %>%
+  group_by(URM, Gender) %>%
+  summarise(
+    n = n(),
+    higher_part1_count = sum(!is.na(Exam1) & Exam1 > 0 & Part1_final > Exam1 &
+    ((!is.na(Exam2) & Exam2 > 0 & Part2_final <= Exam2) | (is.na(Exam2)) & Part2_final == 0)),
+    higher_part1_pct = higher_part1_count / n(),
+    higher_part1_mean_benefit = mean((Part1_final - Exam1)[!is.na(Exam1) & Exam1 > 0 & Part1_final > Exam1 &
+    ((!is.na(Exam2) & Exam2 > 0 & Part2_final <= Exam2) | (is.na(Exam2)) & Part2_final == 0)], na.rm = TRUE),
+    higher_part1_mean_benfit_pct = higher_part1_mean_benefit / 500, 
+    
+    higher_part2_count = sum(!is.na(Exam2) & Exam2 > 0 & Part2_final > Exam2 &
+    ((!is.na(Exam1) & Exam1 > 0 & Part1_final <= Exam1) | (is.na(Exam1)) & Part1_final == 0)),
+    higher_part2_pct = higher_part2_count / n(),
+    higher_part2_mean_benefit = mean((Part2_final - Exam2)[!is.na(Exam2) & Exam2 > 0 & Part2_final > Exam2 &
+    ((!is.na(Exam1) & Exam1 > 0 & Part1_final <= Exam1) | (is.na(Exam1)) & Part1_final == 0)], na.rm = TRUE),
+    higher_part2_mean_benfit_pct = higher_part2_mean_benefit / 500, 
+    
+    higher_both_count = sum((!is.na(Exam1) & !is.na(Exam2) & Exam1 > 0 & Exam2 > 0 & Part1_final > Exam1 & Part2_final > Exam2) | 
+            (is.na(Exam1) & Part1_final > 0 & is.na(Exam2) & Part2_final > 0)),
+    higher_both_pct = higher_both_count / n(),
+    higher_both_mean_benefit = mean(((Part1_final - Exam1) + (Part2_final - Exam2))[(!is.na(Exam1) & !is.na(Exam2) & Exam1 > 0 & Exam2 > 0 & Part1_final > Exam1 & Part2_final > Exam2) | 
+            (is.na(Exam1) & Part1_final > 0 & is.na(Exam2) & Part2_final > 0)], na.rm = TRUE),
+    higher_both_mean_benfit_pct = higher_both_mean_benefit / 500, 
+    
+    lower_both_count = sum(
+      (!is.na(Exam1) & !is.na(Exam2) & Exam1 > 0 & Exam2 > 0 & 
+       Part1_final <= Exam1 & Part2_final <= Exam2) |
+      (is.na(Exam1) & !is.na(Exam2) & Exam2 > 0 & Part2_final <= Exam2 & Part1_final == 0) |
+      (is.na(Exam2) & !is.na(Exam1) & Exam1 > 0 & Part1_final <= Exam1 & Part2_final == 0) |
+      ((!is.na(Exam1) & Exam1 == 0) | (!is.na(Exam2) & Exam2 == 0))
+    ),
+    lower_both_pct = lower_both_count / n(),
+    lower_both_mean_benefit = 0
+  )
+
+print(CS110_URM_Gender_summary)
+```
+
+```{r}
+# Summarize the results for CS110 by Instruction Mode.
+CS110_Instru_mode_summary <- filtered_CS110 %>%
+  group_by(Instru_mode) %>%
+  summarise(
+    n = n(),
+    higher_part1_count = sum(!is.na(Exam1) & Exam1 > 0 & Part1_final > Exam1 &
+    ((!is.na(Exam2) & Exam2 > 0 & Part2_final <= Exam2) | (is.na(Exam2)) & Part2_final == 0)),
+    higher_part1_pct = higher_part1_count / n(),
+    higher_part1_mean_benefit = mean((Part1_final - Exam1)[!is.na(Exam1) & Exam1 > 0 & Part1_final > Exam1 &
+    ((!is.na(Exam2) & Exam2 > 0 & Part2_final <= Exam2) | (is.na(Exam2)) & Part2_final == 0)], na.rm = TRUE),
+    higher_part1_mean_benfit_pct = higher_part1_mean_benefit / 500, 
+    
+    higher_part2_count = sum(!is.na(Exam2) & Exam2 > 0 & Part2_final > Exam2 &
+    ((!is.na(Exam1) & Exam1 > 0 & Part1_final <= Exam1) | (is.na(Exam1)) & Part1_final == 0)),
+    higher_part2_pct = higher_part2_count / n(),
+    higher_part2_mean_benefit = mean((Part2_final - Exam2)[!is.na(Exam2) & Exam2 > 0 & Part2_final > Exam2 &
+    ((!is.na(Exam1) & Exam1 > 0 & Part1_final <= Exam1) | (is.na(Exam1)) & Part1_final == 0)], na.rm = TRUE),
+    higher_part2_mean_benfit_pct = higher_part2_mean_benefit / 500, 
+    
+    higher_both_count = sum((!is.na(Exam1) & !is.na(Exam2) & Exam1 > 0 & Exam2 > 0 & Part1_final > Exam1 & Part2_final > Exam2) | 
+            (is.na(Exam1) & Part1_final > 0 & is.na(Exam2) & Part2_final > 0)),
+    higher_both_pct = higher_both_count / n(),
+    higher_both_mean_benefit = mean(((Part1_final - Exam1) + (Part2_final - Exam2))[(!is.na(Exam1) & !is.na(Exam2) & Exam1 > 0 & Exam2 > 0 & Part1_final > Exam1 & Part2_final > Exam2) | 
+            (is.na(Exam1) & Part1_final > 0 & is.na(Exam2) & Part2_final > 0)], na.rm = TRUE),
+    higher_both_mean_benfit_pct = higher_both_mean_benefit / 500, 
+    
+    lower_both_count = sum(
+      (!is.na(Exam1) & !is.na(Exam2) & Exam1 > 0 & Exam2 > 0 & 
+       Part1_final <= Exam1 & Part2_final <= Exam2) |
+      (is.na(Exam1) & !is.na(Exam2) & Exam2 > 0 & Part2_final <= Exam2 & Part1_final == 0) |
+      (is.na(Exam2) & !is.na(Exam1) & Exam1 > 0 & Part1_final <= Exam1 & Part2_final == 0) |
+      ((!is.na(Exam1) & Exam1 == 0) | (!is.na(Exam2) & Exam2 == 0))
+    ),
+    lower_both_pct = lower_both_count / n(),
+    lower_both_mean_benefit = 0
+  )
+
+print(CS110_Instru_mode_summary)
+```
+
+```{r}
+# Take the computation for mean benefits for CS170 overall
+# Calculate the mean benefit for higher_part1 ONLY
+higher_part1_mean_benefit_CS170 <- filtered_CS170 %>%
+  filter(
+    (!is.na(Exam1) & Exam1 > 0 & Part1_final > Exam1) &
+    ((!is.na(Exam2) & Exam2 > 0 & Part2_final <= Exam2) |
+       (is.na(Exam2)) & Part2_final == 0)) %>%
+  summarise(mean_benefit = mean(Part1_final - Exam1, na.rm = TRUE)) %>%
+  pull(mean_benefit)
+
+# Calculate the mean benefit for higher_part2  
+higher_part2_mean_benefit_CS170 <- filtered_CS170 %>%
+  filter(
+    (!is.na(Exam2) & Exam2 > 0 & Part2_final > Exam2) &
+    ((!is.na(Exam1) & Exam1 > 0 & Part1_final <= Exam1) |
+       (is.na(Exam1)) & Part1_final == 0)) %>%
+  summarise(mean_benefit = mean(Part2_final - Exam2, na.rm = TRUE)) %>%
+  pull(mean_benefit)
+
+# Calculate the mean benefit for higher_both
+higher_both_mean_benefit_CS170 <- filtered_CS170 %>%
+  filter((!is.na(Exam1) & !is.na(Exam2) & Exam1 > 0 & Exam2 > 0 & Part1_final > Exam1 & Part2_final > Exam2) | 
+            (is.na(Exam1) & Part1_final > 0 & is.na(Exam2) & Part2_final > 0)) %>%
+  mutate(total_benefit = (Part1_final - Exam1) + (Part2_final - Exam2)) %>%
+  summarise(mean_benefit = mean(total_benefit, na.rm = TRUE)) %>%
+  pull(mean_benefit)
+
+# Summarize the results for CS170 overall
+CS170_overall <- filtered_CS170 %>%
+  summarise(
+    n = n(),
+    higher_part1_count = sum(!is.na(Exam1) & Exam1 > 0 & Part1_final > Exam1 &
+    ((!is.na(Exam2) & Exam2 > 0 & Part2_final <= Exam2) | (is.na(Exam2)) & Part2_final == 0)),
+    higher_part1_pct = higher_part1_count / nrow(filtered_CS170),
+    higher_part1_mean_benefit = higher_part1_mean_benefit_CS170,
+    higher_part1_mean_benfit_pct = higher_part1_mean_benefit / 500, 
+    higher_part2_count = sum(!is.na(Exam2) & Exam2 > 0 & Part2_final > Exam2 &
+    ((!is.na(Exam1) & Exam1 > 0 & Part1_final <= Exam1) | (is.na(Exam1)) & Part1_final == 0)),
+    higher_part2_pct = higher_part2_count / nrow(filtered_CS170),
+    higher_part2_mean_benefit = higher_part2_mean_benefit_CS170,
+    higher_part2_mean_benfit_pct = higher_part2_mean_benefit / 500,
+    higher_both_count = sum((!is.na(Exam1) & !is.na(Exam2) & Exam1 > 0 & Exam2 > 0 & Part1_final > Exam1 & Part2_final > Exam2) | 
+            (is.na(Exam1) & Part1_final > 0 & is.na(Exam2) & Part2_final > 0)),
+    higher_both_pct = higher_both_count / nrow(filtered_CS170),
+    higher_both_mean_benefit = higher_both_mean_benefit_CS170,
+    higher_both_mean_benfit_pct = higher_both_mean_benefit / 500, 
+    lower_both_count = sum(
+      # Case 1: Both midterm exams are non-null, non-zero, and both finals are not higher
+      (!is.na(Exam1) & !is.na(Exam2) & Exam1 > 0 & Exam2 > 0 & 
+       Part1_final <= Exam1 & Part2_final <= Exam2) |
+      # Case 2: Exam1 is null, Exam2 is non-zero, Part2_final is not higher, and Part1_final is zero
+      (is.na(Exam1) & !is.na(Exam2) & Exam2 > 0 & Part2_final <= Exam2 & Part1_final == 0) |
+      # Case 3: Exam2 is null, Exam1 is non-zero, Part1_final is not higher, and Part2_final is zero
+      (is.na(Exam2) & !is.na(Exam1) & Exam1 > 0 & Part1_final <= Exam1 & Part2_final == 0) |
+      # Case 4: Either exam is zero (student doesn't benefit)
+      ((!is.na(Exam1) & Exam1 == 0) | (!is.na(Exam2) & Exam2 == 0))
+    ),
+    lower_both_pct = lower_both_count / n(),
+    lower_both_mean_benefit = 0
+  )
+
+print(CS170_overall)
+```
+
+```{r}
+# Summarize the results for CS170 by Gender
+CS170_Gender_summary <- filtered_CS170 %>%
+  group_by(Gender) %>%
+ summarise(
+    n = n(), 
+    higher_part1_count = sum(!is.na(Exam1) & Exam1 > 0 & Part1_final > Exam1 &
+    ((!is.na(Exam2) & Exam2 > 0 & Part2_final <= Exam2) | (is.na(Exam2)) & Part2_final == 0)),
+    higher_part1_pct = higher_part1_count / n(),
+    higher_part1_mean_benefit = mean((Part1_final - Exam1)[!is.na(Exam1) & Exam1 > 0 & Part1_final > Exam1 &
+    ((!is.na(Exam2) & Exam2 > 0 & Part2_final <= Exam2) | (is.na(Exam2)) & Part2_final == 0)], na.rm = TRUE),
+    higher_part1_mean_benfit_pct = higher_part1_mean_benefit / 500, 
+    
+    higher_part2_count = sum(!is.na(Exam2) & Exam2 > 0 & Part2_final > Exam2 &
+    ((!is.na(Exam1) & Exam1 > 0 & Part1_final <= Exam1) | (is.na(Exam1)) & Part1_final == 0)),
+    higher_part2_pct = higher_part2_count / n(),
+    higher_part2_mean_benefit = mean((Part2_final - Exam2)[!is.na(Exam2) & Exam2 > 0 & Part2_final > Exam2 &
+    ((!is.na(Exam1) & Exam1 > 0 & Part1_final <= Exam1) | (is.na(Exam1)) & Part1_final == 0)], na.rm = TRUE),
+    higher_part2_mean_benfit_pct = higher_part2_mean_benefit / 500,
+    
+    higher_both_count = sum((!is.na(Exam1) & !is.na(Exam2) & Exam1 > 0 & Exam2 > 0 & Part1_final > Exam1 & Part2_final > Exam2) | 
+            (is.na(Exam1) & Part1_final > 0 & is.na(Exam2) & Part2_final > 0)),
+    higher_both_pct = higher_both_count / n(),
+    higher_both_mean_benefit = mean(((Part1_final - Exam1) + (Part2_final - Exam2))[(!is.na(Exam1) & !is.na(Exam2) & Exam1 > 0 & Exam2 > 0 & Part1_final > Exam1 & Part2_final > Exam2) | 
+            (is.na(Exam1) & Part1_final > 0 & is.na(Exam2) & Part2_final > 0)], na.rm = TRUE),
+    higher_both_mean_benfit_pct = higher_both_mean_benefit / 500, 
+    
+    lower_both_count = sum(
+      (!is.na(Exam1) & !is.na(Exam2) & Exam1 > 0 & Exam2 > 0 & 
+       Part1_final <= Exam1 & Part2_final <= Exam2) |
+      (is.na(Exam1) & !is.na(Exam2) & Exam2 > 0 & Part2_final <= Exam2 & Part1_final == 0) |
+      (is.na(Exam2) & !is.na(Exam1) & Exam1 > 0 & Part1_final <= Exam1 & Part2_final == 0) |
+      ((!is.na(Exam1) & Exam1 == 0) | (!is.na(Exam2) & Exam2 == 0))
+    ),
+    lower_both_pct = lower_both_count / n(),
+    lower_both_mean_benefit = 0
+  )
+
+print(CS170_Gender_summary)
+```
+```{r}
+# Summarize the results for CS170 by URM Group
+CS170_URM_summary <- filtered_CS170 %>%
+  group_by(URM) %>%
+ summarise(
+    n = n(),
+    higher_part1_count = sum(!is.na(Exam1) & Exam1 > 0 & Part1_final > Exam1 &
+    ((!is.na(Exam2) & Exam2 > 0 & Part2_final <= Exam2) | (is.na(Exam2)) & Part2_final == 0)),
+    higher_part1_pct = higher_part1_count / n(),
+    higher_part1_mean_benefit = mean((Part1_final - Exam1)[!is.na(Exam1) & Exam1 > 0 & Part1_final > Exam1 &
+    ((!is.na(Exam2) & Exam2 > 0 & Part2_final <= Exam2) | (is.na(Exam2)) & Part2_final == 0)], na.rm = TRUE),
+    higher_part1_mean_benfit_pct = higher_part1_mean_benefit / 500, 
+    
+    higher_part2_count = sum(!is.na(Exam2) & Exam2 > 0 & Part2_final > Exam2 &
+    ((!is.na(Exam1) & Exam1 > 0 & Part1_final <= Exam1) | (is.na(Exam1)) & Part1_final == 0)),
+    higher_part2_pct = higher_part2_count / n(),
+    higher_part2_mean_benefit = mean((Part2_final - Exam2)[!is.na(Exam2) & Exam2 > 0 & Part2_final > Exam2 &
+    ((!is.na(Exam1) & Exam1 > 0 & Part1_final <= Exam1) | (is.na(Exam1)) & Part1_final == 0)], na.rm = TRUE),
+    higher_part2_mean_benfit_pct = higher_part2_mean_benefit / 500,
+    
+    higher_both_count = sum((!is.na(Exam1) & !is.na(Exam2) & Exam1 > 0 & Exam2 > 0 & Part1_final > Exam1 & Part2_final > Exam2) | 
+            (is.na(Exam1) & Part1_final > 0 & is.na(Exam2) & Part2_final > 0)),
+    higher_both_pct = higher_both_count / n(),
+    higher_both_mean_benefit = mean(((Part1_final - Exam1) + (Part2_final - Exam2))[(!is.na(Exam1) & !is.na(Exam2) & Exam1 > 0 & Exam2 > 0 & Part1_final > Exam1 & Part2_final > Exam2) | 
+            (is.na(Exam1) & Part1_final > 0 & is.na(Exam2) & Part2_final > 0)], na.rm = TRUE),
+    higher_both_mean_benfit_pct = higher_both_mean_benefit / 500,
+    
+    lower_both_count = sum(
+      (!is.na(Exam1) & !is.na(Exam2) & Exam1 > 0 & Exam2 > 0 & 
+       Part1_final <= Exam1 & Part2_final <= Exam2) |
+      (is.na(Exam1) & !is.na(Exam2) & Exam2 > 0 & Part2_final <= Exam2 & Part1_final == 0) |
+      (is.na(Exam2) & !is.na(Exam1) & Exam1 > 0 & Part1_final <= Exam1 & Part2_final == 0) |
+      ((!is.na(Exam1) & Exam1 == 0) | (!is.na(Exam2) & Exam2 == 0))
+    ),
+    lower_both_pct = lower_both_count / n(),
+    lower_both_mean_benefit = 0
+  )
+
+print(CS170_URM_summary)
+```
+```{r}
+# Summarize the results for CS170 by Gender within URM groups
+CS170_URM_Gender_summary <- filtered_CS170 %>%
+  group_by(URM, Gender) %>%
+  summarise(
+    n = n(),
+    higher_part1_count = sum(!is.na(Exam1) & Exam1 > 0 & Part1_final > Exam1 &
+    ((!is.na(Exam2) & Exam2 > 0 & Part2_final <= Exam2) | (is.na(Exam2)) & Part2_final == 0)),
+    higher_part1_pct = higher_part1_count / n(),
+    higher_part1_mean_benefit = mean((Part1_final - Exam1)[!is.na(Exam1) & Exam1 > 0 & Part1_final > Exam1 &
+    ((!is.na(Exam2) & Exam2 > 0 & Part2_final <= Exam2) | (is.na(Exam2)) & Part2_final == 0)], na.rm = TRUE),
+    higher_part1_mean_benfit_pct = higher_part1_mean_benefit / 500,
+    
+    higher_part2_count = sum(!is.na(Exam2) & Exam2 > 0 & Part2_final > Exam2 &
+    ((!is.na(Exam1) & Exam1 > 0 & Part1_final <= Exam1) | (is.na(Exam1)) & Part1_final == 0)),
+    higher_part2_pct = higher_part2_count / n(),
+    higher_part2_mean_benefit = mean((Part2_final - Exam2)[!is.na(Exam2) & Exam2 > 0 & Part2_final > Exam2 &
+    ((!is.na(Exam1) & Exam1 > 0 & Part1_final <= Exam1) | (is.na(Exam1)) & Part1_final == 0)], na.rm = TRUE),
+    higher_part2_mean_benfit_pct = higher_part2_mean_benefit / 500,
+    
+    higher_both_count = sum((!is.na(Exam1) & !is.na(Exam2) & Exam1 > 0 & Exam2 > 0 & Part1_final > Exam1 & Part2_final > Exam2) | 
+            (is.na(Exam1) & Part1_final > 0 & is.na(Exam2) & Part2_final > 0)),
+    higher_both_pct = higher_both_count / n(),
+    higher_both_mean_benefit = mean(((Part1_final - Exam1) + (Part2_final - Exam2))[(!is.na(Exam1) & !is.na(Exam2) & Exam1 > 0 & Exam2 > 0 & Part1_final > Exam1 & Part2_final > Exam2) | 
+            (is.na(Exam1) & Part1_final > 0 & is.na(Exam2) & Part2_final > 0)], na.rm = TRUE),
+    higher_both_mean_benfit_pct = higher_both_mean_benefit / 500,
+    
+    lower_both_count = sum(
+      (!is.na(Exam1) & !is.na(Exam2) & Exam1 > 0 & Exam2 > 0 & 
+       Part1_final <= Exam1 & Part2_final <= Exam2) |
+      (is.na(Exam1) & !is.na(Exam2) & Exam2 > 0 & Part2_final <= Exam2 & Part1_final == 0) |
+      (is.na(Exam2) & !is.na(Exam1) & Exam1 > 0 & Part1_final <= Exam1 & Part2_final == 0) |
+      ((!is.na(Exam1) & Exam1 == 0) | (!is.na(Exam2) & Exam2 == 0))
+    ),
+    lower_both_pct = lower_both_count / n(),
+    lower_both_mean_benefit = 0
+  )
+
+print(CS170_URM_Gender_summary)
+```
+```{r}
+# Now we have already used the analysis above to compose some tables containing descriptive statics, we would like to make some visualizations to make the data more straightforward and appealing.
+
+# We can start with some basic data visualizations:
+# 1. Grouped bar chart showing gender composition of CS110 and CS170 student group.
+# Calculate percentages for each course
+gender_percentages <- rbind(
+  filtered_CS110 %>%
+    count(Gender) %>%
+    mutate(percentage = n / sum(n) * 100,
+           Course = "CS110"),
+  filtered_CS170 %>%
+    count(Gender) %>%
+    mutate(percentage = n / sum(n) * 100,
+           Course = "CS170")
+)
+
+# Create the grouped bar chart with percentage labels and legend at the bottom
+ggplot(gender_percentages, aes(x = Course, y = percentage, fill = Gender)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.9)) +
+  geom_text(aes(label = sprintf("%.1f%%", percentage)),
+            position = position_dodge(width = 0.9),
+            vjust = -0.5,
+            size = 3.5) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +  # Move legend to the bottom
+  labs(title = "Gender Distribution in CS110 and CS170",
+       x = "Course",
+       y = "Percentage",
+       fill = "Gender") +
+  scale_y_continuous(labels = scales::percent_format(scale = 1), 
+                     limits = c(0, max(gender_percentages$percentage) * 1.1)) +
+  scale_fill_brewer(palette = "Set2")
+```
+```{r}
+# 2. Grouped bar chart showing URM composition of CS110 and CS170 student group.
+
+## Calculate percentages for each course
+urm_percentages <- rbind(
+  filtered_CS110 %>%
+    count(URM) %>%
+    mutate(percentage = n / sum(n) * 100,
+           Course = "CS110"),
+  filtered_CS170 %>%
+    count(URM) %>%
+    mutate(percentage = n / sum(n) * 100,
+           Course = "CS170")
+)
+
+# Convert URM to factor with labels
+urm_percentages$URM <- factor(urm_percentages$URM, 
+                              levels = c(0, 1), 
+                              labels = c("Non-URM", "URM"))
+
+# Create the grouped bar chart with percentage labels and legend at the bottom
+ggplot(urm_percentages, aes(x = Course, y = percentage, fill = URM)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.9)) +
+  geom_text(aes(label = sprintf("%.1f%%", percentage)),
+            position = position_dodge(width = 0.9),
+            vjust = -0.5,
+            size = 3.5) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +  # Move legend to the bottom
+  labs(title = "URM Distribution in CS110 and CS170",
+       x = "Course",
+       y = "Percentage",
+       fill = "URM Status") +
+  scale_y_continuous(labels = scales::percent_format(scale = 1), 
+                     limits = c(0, max(urm_percentages$percentage) * 1.1)) +
+  scale_fill_brewer(palette = "Set2")
+```
+```{r}
+# 3. Grouped bar charts showing gender composition within URM group of CS110 and CS170 student group.
+
+# Function to calculate percentages for a single course
+calculate_percentages <- function(df) {
+  df %>%
+    group_by(URM, Gender) %>%
+    summarise(count = n()) %>%
+    mutate(percentage = count / sum(count) * 100) %>%
+    ungroup() %>%
+    mutate(Group = paste(ifelse(URM == 1, "URM", "Non-URM"), Gender))
+}
+
+# Calculate percentages for each course
+cs110_percentages <- calculate_percentages(filtered_CS110) %>% mutate(Course = "CS110")
+cs170_percentages <- calculate_percentages(filtered_CS170) %>% mutate(Course = "CS170")
+
+# Combine data
+combined_percentages <- bind_rows(cs110_percentages, cs170_percentages)
+
+# Create the grouped bar chart
+ggplot(combined_percentages, aes(x = Course, y = percentage, fill = Group)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.9)) +
+  geom_text(aes(label = sprintf("%.1f%%", percentage)),
+            position = position_dodge(width = 0.9),
+            vjust = -0.5,  # Adjust this value to change label position
+            size = 3) +    # Adjust this value to change label size
+  theme_minimal() +
+  labs(title = "Gender and URM Distribution in CS110 and CS170",
+       x = "Course",
+       y = "Percentage",
+       fill = "Group") +
+  scale_y_continuous(labels = scales::percent_format(scale = 1), 
+                     limits = c(0, max(combined_percentages$percentage) * 1.1)) +  # Extend y-axis to make room for labels
+  scale_fill_brewer(palette = "Set2") +
+  theme(legend.position = "bottom")  # Move legend to bottom for better visibility
+```
+
+```{r}
+# Add a course identifier and combine the data frames
+combined_data <- bind_rows(
+  CS110_overall %>% mutate(Course = "CS110"),
+  CS170_overall %>% mutate(Course = "CS170")
+) %>% 
+  select(Course, higher_part1_pct, higher_part2_pct, higher_both_pct)
+
+# Reshape the data to long format
+long_data <- combined_data %>%
+  pivot_longer(
+    cols = ends_with("_pct"), 
+    names_to = "Part",
+    values_to = "Percentage"
+  ) %>%
+  mutate(
+    Part = case_when(
+      Part == "higher_part1_pct" ~ "Part 1",
+      Part == "higher_part2_pct" ~ "Part 2",
+      Part == "higher_both_pct" ~ "Both parts"
+    ),
+    Part = factor(Part, levels = c("Part 1", "Part 2", "Both parts")),
+    Percentage = Percentage * 100
+  )
+
+# Plot the data
+ggplot(long_data, aes(x = Part, y = Percentage, fill = Course)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.9)) +
+  geom_text(aes(label = sprintf("%.1f%%", Percentage)),
+            position = position_dodge(width = 0.9),
+            vjust = -0.5,
+            size = 3) +
+  theme_minimal() +
+  labs(title = "Percentage of Students Benefiting from SCP by Course",
+       x = "Part of Final",
+       y = "Percentage Benfited from SCP",
+       fill = "Course") +
+  scale_y_continuous(labels = scales::percent_format(scale = 1), 
+                     limits = c(0, max(long_data$Percentage) * 1.1)) +
+  scale_fill_brewer(palette = "Set2") +
+  theme(legend.position = "bottom")
+```
+
+```{r}
+# Add a course identifier and combine the data frames
+combined_data <- bind_rows(
+  CS110_Gender_summary %>% mutate(Course = "CS110"),
+  CS170_Gender_summary %>% mutate(Course = "CS170")
+) %>% 
+  select(Course, Gender, higher_part1_pct, higher_part2_pct, higher_both_pct)
+
+# Reshape the data to long format
+long_data <- combined_data %>%
+  pivot_longer(
+    cols = ends_with("_pct"), 
+    names_to = "Part",
+    values_to = "Percentage"
+  ) %>%
+  mutate(
+    Part = case_when(
+      Part == "higher_part1_pct" ~ "Part 1",
+      Part == "higher_part2_pct" ~ "Part 2",
+      Part == "higher_both_pct" ~ "Both parts"
+    ),
+    Part = factor(Part, levels = c("Part 1", "Part 2", "Both parts")),
+    Percentage = Percentage * 100
+  )
+
+
+# Plot the data
+ggplot(long_data, aes(x = Part, y = Percentage, fill = Gender)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.9)) +
+  facet_wrap(~Course) +
+  geom_text(aes(label = sprintf("%.1f%%", Percentage)),
+            position = position_dodge(width = 0.9),
+            vjust = -0.5) +    # Adjust this value to change label size
+  theme_minimal() +
+  labs(title = "Percentage of Students Benefiting from SCP by Gender and Course",
+       x = "Part of Final",
+       y = "Percentage Benfited from SCP",
+       fill = "Gender") +
+  scale_y_continuous(labels = scales::percent_format(scale = 1), 
+                     limits = c(0, max(combined_percentages$percentage) * 1.1)) +  # Extend y-axis to make room for labels
+  scale_fill_brewer(palette = "Set2") +
+  theme(legend.position = "bottom") 
+```
+
+```{r}
+# Add a course identifier and combine the data frames
+combined_data <- bind_rows(
+  CS110_URM_summary %>% mutate(Course = "CS110"),
+  CS170_URM_summary %>% mutate(Course = "CS170")
+) %>% 
+  select(Course, URM, higher_part1_pct, higher_part2_pct, higher_both_pct)
+
+# Reshape the data to long format
+long_data <- combined_data %>%
+  pivot_longer(
+    cols = ends_with("_pct"), 
+    names_to = "Part",
+    values_to = "Percentage"
+  ) %>%
+  mutate(
+    Part = case_when(
+      Part == "higher_part1_pct" ~ "Part 1",
+      Part == "higher_part2_pct" ~ "Part 2",
+      Part == "higher_both_pct" ~ "Both parts"
+    ),
+    Part = factor(Part, levels = c("Part 1", "Part 2", "Both parts")),
+    Percentage = Percentage * 100,
+    URM = ifelse(URM == 1, "URM", "Non-URM")
+  )
+
+
+# Plot the data
+ggplot(long_data, aes(x = Part, y = Percentage, fill = URM)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.9)) +
+  facet_wrap(~Course) +
+  geom_text(aes(label = sprintf("%.1f%%", Percentage)),
+            position = position_dodge(width = 0.9),
+            vjust = -0.5) +    # Adjust this value to change label size
+  theme_minimal() +
+  labs(title = "Percentage of Students Benefiting from SCP by URM and Course",
+       x = "Part of Final",
+       y = "Percentage Benfited from SCP",
+       fill = "URM") +
+  scale_y_continuous(labels = scales::percent_format(scale = 1), 
+                     limits = c(0, max(combined_percentages$percentage) * 1.1)) +  # Extend y-axis to make room for labels
+  scale_fill_brewer(palette = "Set2") +
+  theme(legend.position = "bottom") 
+```
+
+```{r}
+# Add a course identifier and combine the data frames
+combined_data <- bind_rows(
+  CS110_URM_Gender_summary %>% mutate(Course = "CS110"),
+  CS170_URM_Gender_summary %>% mutate(Course = "CS170")
+) %>% 
+  select(Course, Gender, URM, higher_part1_pct, higher_part2_pct, higher_both_pct)
+
+# Reshape the data to long format
+long_data <- combined_data %>%
+  pivot_longer(
+    cols = ends_with("_pct"), 
+    names_to = "Part",
+    values_to = "Percentage"
+  ) %>%
+  mutate(
+    Part = case_when(
+      Part == "higher_part1_pct" ~ "Part 1",
+      Part == "higher_part2_pct" ~ "Part 2",
+      Part == "higher_both_pct" ~ "Both parts"
+    ),
+    Part = factor(Part, levels = c("Part 1", "Part 2", "Both parts")),
+    Percentage = Percentage * 100,
+    Group = paste(ifelse(URM == 1, "URM", "Non-URM"), Gender)
+  )
+
+# Plot the data
+ggplot(long_data, aes(x = Part, y = Percentage, fill = Group)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.9)) +
+  facet_wrap(~Course) +
+  geom_text(aes(label = sprintf("%.1f%%", Percentage)),
+            position = position_dodge(width = 0.9),
+            vjust = -0.5,
+            size = 2) +    # Reduced from 3 to 2
+  theme_minimal(base_size = 8) +  # Added base_size to reduce overall font size
+  labs(title = "Percentage of Students Benefiting from SCP by Demographic Group and Course",
+       x = "Part of Final",
+       y = "Percentage Benfited from SCP",
+       fill = "Demographic Group") +
+  scale_y_continuous(labels = scales::percent_format(scale = 1), 
+                     limits = c(0, max(long_data$Percentage) * 1.1)) +  # Changed to use long_data
+  scale_fill_brewer(palette = "Set2") +
+  theme(legend.position = "bottom",
+        plot.title = element_text(size = 10))  # Reduced title font size
+```
+
+```{r}
+data <- CS110_Instru_mode_summary %>% 
+  select(Instru_mode, higher_part1_pct, higher_part2_pct, higher_both_pct)
+
+# Reshape the data to long format
+long_data <- data %>%
+  pivot_longer(
+    cols = ends_with("_pct"), 
+    names_to = "Part",
+    values_to = "Percentage"
+  ) %>%
+  mutate(
+    Part = case_when(
+      Part == "higher_part1_pct" ~ "Part 1",
+      Part == "higher_part2_pct" ~ "Part 2",
+      Part == "higher_both_pct" ~ "Both parts"
+    ),
+    Part = factor(Part, levels = c("Part 1", "Part 2", "Both parts")),
+    Percentage = Percentage * 100
+  )
+
+
+# Plot the data
+ggplot(long_data, aes(x = Part, y = Percentage, fill = Instru_mode)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.9)) +
+  geom_text(aes(label = sprintf("%.1f%%", Percentage)),
+            position = position_dodge(width = 0.9),
+            vjust = -0.5,
+            size = 3) +    # Adjust this value to change label size
+  theme_minimal() +
+  labs(title = "Percentage of Students Benefiting from SCP by Instruction Mode in CS110",
+       x = "Part of Final",
+       y = "Percentage Benfited from SCP",
+       fill = "Instruction Mode") +
+  scale_y_continuous(labels = scales::percent_format(scale = 1), 
+                     limits = c(0, max(combined_percentages$percentage) * 1.1)) +  # Extend y-axis to make room for labels
+  scale_fill_brewer(palette = "Set2") +
+  theme(legend.position = "bottom") 
+```
+```{r}
+library(ggplot2)
+library(dplyr)
+
+# Function to create a pie chart with smaller font
+create_pie_chart <- function(data, title) {
+  ggplot(data, aes(x = "", y = Percentage, fill = Category)) +
+    geom_bar(stat = "identity", width = 1) +
+    coord_polar("y", start = 0) +
+    theme_void() +
+    theme(
+      legend.position = "bottom",
+      legend.text = element_text(size = 8),
+      plot.title = element_text(size = 10, hjust = 0.5)
+    ) +
+    labs(title = title, fill = "") +
+    geom_text(aes(label = paste0(Percentage, "%")), 
+              position = position_stack(vjust = 0.5),
+              size = 3) +  # Reduced text size for percentages
+    scale_fill_brewer(palette = "Set2")
+}
+
+# University Gender Distribution
+university_gender <- data.frame(
+  Category = c("Male", "Female"),
+  Percentage = c(46, 54)
+)
+
+# University URM Distribution
+university_urm <- data.frame(
+  Category = c("URM", "Non-URM"),
+  Percentage = c(26.3, 73.7)
+)
+
+# CS Majors Gender Distribution
+cs_gender <- data.frame(
+  Category = c("Male", "Female"),
+  Percentage = c(81, 19)
+)
+
+# CS Majors URM Distribution
+cs_urm <- data.frame(
+  Category = c("URM", "Non-URM"),
+  Percentage = c(6.24, 93.76)
+)
+
+# Create the pie charts
+p1 <- create_pie_chart(university_gender, "University Gender Distribution")
+p2 <- create_pie_chart(university_urm, "University URM Distribution")
+p3 <- create_pie_chart(cs_gender, "CS Majors Gender Distribution")
+p4 <- create_pie_chart(cs_urm, "CS Majors URM Distribution")
+
+# Save each plot individually
+ggsave("university_gender_distribution.png", p1, width = 6, height = 6)
+ggsave("university_urm_distribution.png", p2, width = 6, height = 6)
+ggsave("cs_majors_gender_distribution.png", p3, width = 6, height = 6)
+ggsave("cs_majors_urm_distribution.png", p4, width = 6, height = 6)
+
+# Display each plot (optional)
+print(p1)
+print(p2)
+print(p3)
+print(p4)
+```
+
+
+```{r}
